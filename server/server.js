@@ -1,87 +1,51 @@
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const fs = require('fs');
-const path = require('path');
-const { WebSocketServer } = require('ws');
-
-const PORT = process.env.PORT || 8080;
-const HISTORY_FILE = path.join(__dirname, 'messages.json');
+// ==============================
+// Real-Time Chat Server (Render Ready)
+// ==============================
+import express from "express";
+import { WebSocketServer } from "ws";
+import http from "http";
+import cors from "cors";
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// Load existing messages
-function loadHistory() {
-  try {
-    if (!fs.existsSync(HISTORY_FILE)) return [];
-    const raw = fs.readFileSync(HISTORY_FILE, 'utf8');
-    return JSON.parse(raw || '[]');
-  } catch {
-    return [];
-  }
-}
-
-// Save updated history
-function saveHistory(history) {
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf8');
-}
-
-let history = loadHistory();
-
-// API endpoint to get message history
-app.get('/history', (req, res) => {
-  res.json(history);
+// Simple root route (helps Render show "Live" status)
+app.get("/", (req, res) => {
+  res.send("✅ Chat WebSocket Server is running!");
 });
 
-// API endpoint to post a message (optional)
-app.post('/message', (req, res) => {
-  const { user, text } = req.body;
-  if (!user || !text) return res.status(400).json({ error: 'Invalid message' });
-
-  const msg = { id: Date.now(), user, text, ts: new Date().toISOString() };
-  history.push(msg);
-  if (history.length > 500) history.shift();
-  saveHistory(history);
-
-  // Broadcast to all connected WebSocket clients
-  wss.clients.forEach((ws) => {
-    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'message', payload: msg }));
-  });
-
-  res.json({ ok: true });
-});
-
-// Start HTTP + WebSocket server
-const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-  ws.send(JSON.stringify({ type: 'history', payload: history }));
+let clients = [];
 
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.type === 'message') {
-        const chat = {
-          id: Date.now(),
-          user: msg.payload.user,
-          text: msg.payload.text,
-          ts: new Date().toISOString(),
-        };
-        history.push(chat);
-        saveHistory(history);
-        wss.clients.forEach((client) => {
-          if (client.readyState === client.OPEN)
-            client.send(JSON.stringify({ type: 'message', payload: chat }));
-        });
+wss.on("connection", (ws) => {
+  clients.push(ws);
+  console.log("🟢 Client connected");
+
+  ws.on("message", (message) => {
+    console.log("📩 Received:", message.toString());
+    // Broadcast to all clients
+    for (const client of clients) {
+      if (client.readyState === ws.OPEN) {
+        client.send(message.toString());
       }
-    } catch (e) {
-      console.error(e);
     }
   });
 
-  ws.on('close', () => console.log('Client disconnected'));
+  ws.on("close", () => {
+    console.log("🔴 Client disconnected");
+    clients = clients.filter((c) => c !== ws);
+  });
 });
+
+// 💤 Keep server alive (Render will ping this route)
+setInterval(() => {
+  fetch(`https://${process.env.RENDER_EXTERNAL_HOSTNAME || "localhost"}/`)
+    .then(() => console.log("💤 Keep-alive ping sent"))
+    .catch(() => {});
+}, 14 * 60 * 1000); // every 14 minutes
+
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

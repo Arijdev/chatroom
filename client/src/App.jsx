@@ -14,7 +14,7 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8080");
+    const ws = new WebSocket("wss://chatroom-server.onrender.com");
     wsRef.current = ws;
 
     ws.onopen = () => setWsStatus("Connected");
